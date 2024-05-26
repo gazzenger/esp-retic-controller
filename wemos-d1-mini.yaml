@@ -52,8 +52,8 @@ globals:
 script:
   - id: timer_relay
     then:
-    - delay: 5 seconds
-    # - delay: 5 minutes
+    # - delay: 5 seconds
+    - delay: 5 minutes
     - script.execute: relay_action_script
 
   - id: relay_action_script
