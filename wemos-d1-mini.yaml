@@ -1,0 +1,327 @@
+esphome:
+  name: test
+  friendly_name: test
+
+esp8266:
+  board: d1_mini
+
+# Enable logging
+logger:
+
+# Enable Home Assistant API
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  use_address: 192.168.30.16
+
+  # Enable fallback hotspot (captive portal) in case wifi connection fails
+  ap:
+    ssid: !secret ap_ssid
+    password: !secret ap_password
+
+captive_portal:
+
+globals:
+  - id: disable_switch
+    type: boolean
+    restore_value: false
+    initial_value: "false"
+
+  - id: rainsensor_switch
+    type: boolean
+    restore_value: false
+    initial_value: "false"
+  
+  - id: cancel_flag
+    type: boolean
+    restore_value: false
+    initial_value: "false"
+
+  - id: timer_flag
+    type: boolean
+    restore_value: false
+    initial_value: "false"
+
+script:
+  - id: timer_relay
+    then:
+    - delay: 5 seconds
+    # - delay: 5 minutes
+    - script.execute: relay_action_script
+
+  - id: relay_action_script
+    then:
+    - lambda: |-
+        if ( id(relay1).state ){
+          if ( !id(cancel_flag) && id(timer_flag) ) { id(relay2).turn_on(); }
+          id(relay1).turn_off();
+        }
+        else if ( id(relay2).state ){
+          if ( !id(cancel_flag) && id(timer_flag) ) { id(relay3).turn_on(); }
+          id(relay2).turn_off();
+        }
+        else if ( id(relay3).state ){
+          if ( !id(cancel_flag) && id(timer_flag) ) { id(relay4).turn_on(); }
+          id(relay3).turn_off();
+        }
+        else if ( id(relay4).state ){
+          if ( !id(cancel_flag) && id(timer_flag) ) { id(timer_flag) = false; }
+          id(relay4).turn_off();
+        }
+
+  - id: cancel_script
+    then:
+    - lambda: 'id(cancel_flag) = true;'
+    - script.stop: timer_relay
+    - switch.turn_off: relay1
+    - switch.turn_off: relay2
+    - switch.turn_off: relay3
+    - switch.turn_off: relay4
+
+  - id: start_next_script
+    then:
+    - script.stop: timer_relay
+    - lambda: |-
+        if (id(relay1).state || id(relay2).state || id(relay3).state || id(relay4).state) {
+          id(relay_action_script).execute();
+        }
+        else if ( id(power_btn).state && !id(rainsensor_switch) && !id(disable_switch) ) {
+          id(cancel_flag) = false;
+          id(timer_flag) = true;
+          id(relay1).turn_on();
+        }
+
+time:
+  # 5am timer
+  - platform: sntp
+    timezone: Australia/Perth
+    on_time:
+      - seconds: 0
+        minutes: 00
+        hours: 5
+        days_of_week: TUE,FRI
+      # - cron: '00 /2 * * * *'
+        then:
+          if:
+            condition:
+              and:
+                - binary_sensor.is_on: power_btn
+                - lambda: 'return !id(rainsensor_switch);'
+                - lambda: 'return !id(disable_switch);'
+            then:
+              - lambda: 'id(cancel_flag) = false;'
+              - lambda: 'id(timer_flag) = true;'
+              - switch.turn_on: relay1
+  # 8pm timer
+  - platform: sntp
+    timezone: Australia/Perth
+    on_time:
+      - seconds: 0
+        minutes: 00
+        hours: 20
+        days_of_week: TUE,FRI
+        then:
+          if:
+            condition:
+              and:
+                - binary_sensor.is_on: power_btn
+                - lambda: 'return !id(rainsensor_switch);'
+                - lambda: 'return !id(disable_switch);'
+            then:
+              - lambda: 'id(cancel_flag) = false;'
+              - lambda: 'id(timer_flag) = true;'
+              - switch.turn_on: relay1
+
+binary_sensor:
+  - platform: gpio
+    pin:
+      number: D1
+    name: "Power Switch"
+    filters:
+      - invert:
+    id: power_btn
+    on_state:
+      then:
+        if:
+          condition:
+            binary_sensor.is_off: power_btn
+          then:
+            - script.execute: cancel_script
+
+  - platform: gpio
+    pin:
+      number: D2
+    name: "Start / Next Station"
+    filters:
+      - invert:
+    id: click_btn
+    internal: true
+    on_click:
+        then:
+          - script.execute: start_next_script
+
+  - platform: gpio
+    pin:
+      number: D3
+    name: "Cancel Button"
+    filters:
+      - invert:
+    id: cancel_btn
+    internal: true
+    on_click:
+      then:
+        - script.execute: cancel_script
+
+button:
+  - platform: template
+    name: "Start / Next Station"
+    on_press:
+      then:
+        - script.execute: start_next_script
+  
+  - platform: template
+    name: "Cancel Button"
+    on_press:
+      then:
+        - script.execute: cancel_script
+
+switch:
+  - platform: template
+    name: 'Disable Switch'
+    id: disable_switch_temp
+    lambda: return id(disable_switch);
+    turn_on_action:
+      - lambda: |-
+          id(disable_switch) = true;
+    turn_off_action:
+      - lambda: |-
+          id(disable_switch) = false;
+
+  - platform: template
+    name: 'Rain Sensor'
+    id: rainsensor_switch_temp
+    lambda: return id(rainsensor_switch);
+    turn_on_action:
+      - lambda: |-
+          id(rainsensor_switch) = true;
+    turn_off_action:
+      - lambda: |-
+          id(rainsensor_switch) = false;
+
+
+  - platform: template
+    name: 'Relay 1'
+    id: relay1_template
+    lambda: return id(relay1).state;
+    turn_on_action:
+      - lambda: |-
+          if (id(power_btn).state) {
+            id(relay1).turn_on();
+          }
+          else {
+            id(relay1_template).turn_off();
+          }
+    turn_off_action:
+      - lambda: |-
+          id(relay1).turn_off();
+
+  - platform: template
+    name: 'Relay 2'
+    id: relay2_template
+    lambda: return id(relay2).state;
+    turn_on_action:
+      - lambda: |-
+          if (id(power_btn).state) {
+            id(relay2).turn_on();
+          }
+          else {
+            id(relay2_template).turn_off();
+          }
+    turn_off_action:
+      - lambda: |-
+          id(relay2).turn_off();
+
+  - platform: template
+    name: 'Relay 3'
+    id: relay3_template
+    lambda: return id(relay3).state;
+    turn_on_action:
+      - lambda: |-
+          if (id(power_btn).state) {
+            id(relay3).turn_on();
+          }
+          else {
+            id(relay3_template).turn_off();
+          }
+    turn_off_action:
+      - lambda: |-
+          id(relay3).turn_off();
+
+  - platform: template
+    name: 'Relay 4'
+    id: relay4_template
+    lambda: return id(relay4).state;
+    turn_on_action:
+      - lambda: |-
+          if (id(power_btn).state) {
+            id(relay4).turn_on();
+          }
+          else {
+            id(relay4_template).turn_off();
+          }
+    turn_off_action:
+      - lambda: |-
+          id(relay4).turn_off();
+
+
+  - platform: gpio
+    name: Relay 1 Switch
+    id: relay1
+    pin: D5
+    internal: true
+    interlock: [relay2,relay3,relay4]
+    on_turn_on: 
+      then:
+        - script.stop: timer_relay
+        - script.execute: timer_relay
+
+  - platform: gpio
+    name: Relay 2 Switch
+    id: relay2
+    pin: D6
+    internal: true
+    interlock: [relay1,relay3,relay4]
+    on_turn_on: 
+      then:
+        - script.stop: timer_relay
+        - script.execute: timer_relay
+
+  - platform: gpio
+    name: Relay 3 Switch
+    id: relay3
+    pin: D7
+    internal: true
+    interlock: [relay1,relay2,relay4]
+    on_turn_on: 
+      then:
+        - script.stop: timer_relay
+        - script.execute: timer_relay
+
+  - platform: gpio
+    name: Relay 4 Switch
+    id: relay4
+    pin: D8
+    internal: true
+    interlock: [relay1,relay2,relay3]
+    on_turn_on: 
+      then:
+        - script.stop: timer_relay
+        - script.execute: timer_relay
+
