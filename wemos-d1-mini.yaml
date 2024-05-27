@@ -53,7 +53,8 @@ script:
   - id: timer_relay
     then:
     # - delay: 5 seconds
-    - delay: 5 minutes
+    # - delay: 5 minutes
+    - delay: !lambda 'return id(station_duration).state * 60 * 1000;'
     - script.execute: relay_action_script
 
   - id: relay_action_script
@@ -324,4 +325,14 @@ switch:
       then:
         - script.stop: timer_relay
         - script.execute: timer_relay
+
+number:
+  - platform: template
+    name: "Station Duration (minutes)"
+    id: 'station_duration'
+    optimistic: true
+    min_value: 1 # min duration of 1 min
+    max_value: 30 # max duration of 30 min
+    initial_value: 5 # default station duration
+    step: 1
 
